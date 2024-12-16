@@ -4,9 +4,9 @@ from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist
 import sys
 import math
-
+import asyncio
 from rclpy.action import ActionServer
-from multi_robot_challenge_interfaces.action import NavigateToPoint  
+from multi_robot_challenge_interfaces.action import NavigateToPoint
 
 class Bug2(Node):
     def __init__(self, robot_name, follow_side='right'):
@@ -15,20 +15,13 @@ class Bug2(Node):
         self.follow_side = follow_side.lower()
 
         # Action Server
-        self._action_server = ActionServer(self, NavigateToPoint, 'navigate_to_point', self.execute_callback)
-        
+        self._action_server = ActionServer(
+            self, NavigateToPoint, 'navigate_to_point', self.execute_callback
+        )
+
         # Subscribers and publishers with proper namespacing
-        self.laser_subscriber = self.create_subscription(
-            LaserScan,
-            f'/{robot_name}/scan',
-            self.laser_callback,
-            10
-        )
-        self.cmd_vel_publisher = self.create_publisher(
-            Twist,
-            f'/{robot_name}/cmd_vel',
-            10
-        )
+        self.laser_subscriber = self.create_subscription(LaserScan, f'/{robot_name}/scan', self.laser_callback, 10)
+        self.cmd_vel_publisher = self.create_publisher(Twist, f'/{robot_name}/cmd_vel', 10)
 
         # Wall-following variables
         self.active = True
@@ -43,30 +36,28 @@ class Bug2(Node):
         # Timers
         self.create_timer(0.1, self.wall_follower)
 
-    # Endret til server-klient service
-    def execute_callback(self, goal_handle):
-        self.get_logger().info(f'RFått punkt: {goal_handle.request.point}')
+    async def execute_callback(self, goal_handle):
+        self.get_logger().info(f"Fikk målpunkt: {goal_handle.request.point}")
         self.target_point = goal_handle.request.point
 
         feedback = NavigateToPoint.Feedback()
-        while not self.is_goal_reached():
-            if self.navigation_paused:
-                self.get_logger().info('Stopper grunnet stor flamme. Venter på hjelp.')
-                rclpy.sleep(0.5)  # Wait until navigation is resumed
-                continue
 
-            distance = self.calculate_distance()
-            feedback.progress = max(0, min(100, 100 - distance * 10))
+        while not self.is_goal_reached():
+            # Send feedback
+            feedback.progress = self.calculate_progress()
             goal_handle.publish_feedback(feedback)
 
+            # Navigate towards the goal
             self.navigate_to_goal()
+            await asyncio.sleep(0.1)
 
+        # Complete the goal
         goal_handle.succeed()
         result = NavigateToPoint.Result()
         result.success = True
-        result.result_message = 'Målet er nådd.'
+        result.result_message = "Målet er nådd!"
         return result
-    
+
     def laser_callback(self, msg):
         # Process laser scan data for wall following
         ranges = msg.ranges
@@ -87,12 +78,10 @@ class Bug2(Node):
 
     def change_state(self, state):
         if state != self.state:
-            #self.get_logger().info(f'Wall follower - [{state}] - {self.state_dict[state]}')
             self.state = state
 
     def take_action(self):
         regions = self.regions
-
         d = 1.0  # Distance threshold
 
         if regions['front'] > d and regions['f_side'] > d and regions['side'] > d:
@@ -107,18 +96,12 @@ class Bug2(Node):
     def find_wall(self):
         msg = Twist()
         msg.linear.x = 0.3
-        if self.follow_side == 'right':
-            msg.angular.z = -0.3  # Turn right
-        else:
-            msg.angular.z = 0.3   # Turn left
+        msg.angular.z = -0.3 if self.follow_side == 'right' else 0.3
         return msg
 
     def turn(self):
         msg = Twist()
-        if self.follow_side == 'right':
-            msg.angular.z = 0.5  # Turn left to avoid obstacle
-        else:
-            msg.angular.z = -0.5  # Turn right to avoid obstacle
+        msg.angular.z = 0.5 if self.follow_side == 'right' else -0.5
         return msg
 
     def follow_the_wall(self):
@@ -144,10 +127,6 @@ class Bug2(Node):
 
         # Publish velocity command
         self.cmd_vel_publisher.publish(cmd)
-
-        # Timers
-        #self.create_timer(0.1, self.wall_follower)
-        #self.create_timer(self.random_interval(), self.random_marker_check)
 
     def odom_callback(self, msg):
         self.current_pose = msg.position
@@ -175,35 +154,14 @@ class Bug2(Node):
         stop_msg = Twist()
         self.cmd_vel_publisher.publish(stop_msg)
 
-    def resume_navigation(self):
-        self.active = True
+    def calculate_progress(self):
+        if not self.current_pose or not self.target_point:
+            return 0
+        dx = self.target_point.x - self.current_pose.x
+        dy = self.target_point.y - self.current_pose.y
+        distance = math.sqrt(dx**2 + dy**2)
+        return max(0, min(100, 100 - distance * 10))
 
-    def random_interval(self):
-        # Generer random intervaller 
-        import random
-        return random.uniform(5, 15)
-
-    def random_marker_check(self):
-        # Stopper opp for å se etter markører
-        self.get_logger().info('Stopper for å se etter markører')
-        self.pause_navigation()
-        self.r360() 
-        self.resume_navigation()
-        self.get_logger().info('Fortsatter navigasjon.')
-
-    def r360 (self):
-        import time
-        twist_msg = Twist()
-        twist_msg.angular.z = 0.5  # Rotate at a constant speed
-        rotation_duration = 2 * 3.14159 / twist_msg.angular.z  # Approximate 360-degree rotation
-        end_time = time.time() + rotation_duration
-
-        while time.time() < end_time:
-            self.cmd_vel_publisher.publish(twist_msg)
-            time.sleep(0.1)  # Sleep to simulate publishing rate
-
-        # Stop rotation
-        self.cmd_vel_publisher.publish(Twist())
 
 def main(args=None):
     rclpy.init(args=args)

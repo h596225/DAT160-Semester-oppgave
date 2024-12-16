@@ -2,11 +2,11 @@ import rclpy
 from rclpy.node import Node
 
 from geometry_msgs.msg import Point
-from std_msgs.msg import String, Int64  # Int64 brukes for markør-ID-er
+from std_msgs.msg import String, Int64
 
 class Leader(Node):
     def __init__(self):
-        super().__init__('RobotLeaderNode')
+        super().__init__('Leader')
 
         # Subscriptions
         self.sub_help_request = self.create_subscription(Point, '/leader/help_request', self.clbk_help_request, 10)

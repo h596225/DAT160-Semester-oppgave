@@ -48,7 +48,7 @@ class Robot_handler(Node):
     def clbk_marker_id(self, msg):
         self.acro_marker_id = msg.data
 
-        # Send marker ID to leader
+        # Sender markør id nr til lederen
         if self.acro_marker_id not in self.scored_ids:
             self.scored_ids.add(self.acro_marker_id)
             
@@ -56,16 +56,15 @@ class Robot_handler(Node):
             marker_msg.data = self.acro_marker_id
             self.pub_marker_id.publish(marker_msg)
 
-        # If marker is ID 4 (large flame), send help request
+        # Dersom markør 4, send hjelp request
         if self.acro_marker_id == 4 and self.current_pose:
             help_msg = Point(
                 x=self.current_pose.position.x,
                 y=self.current_pose.position.y,
-                z=0.0
-            )
-            # Funker ikke, må se litt mer på denne.
-            # self.pub_request_help.publish(help_msg)
-            # self.get_logger().info(f'Hjelpeforespørsel sendt: ({help_msg.x}, {help_msg.y})')
+                z=0.0)
+            
+            self.pub_request_help.publish(help_msg)
+            self.get_logger().info(f'Hjelpeforespørsel sendt: ({help_msg.x}, {help_msg.y})')
 
 def main(args=None):
     rclpy.init(args=args)
